@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app  # Live reload: Changes in code update instantly
+    environment:
+      - PORT=8000
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app  # Live reload for frontend too
+      - /app/node_modules # Avoid overwriting container modules
+    depends_on:
+      - backend # Wait for backend to start

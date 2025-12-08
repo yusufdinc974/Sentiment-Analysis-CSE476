@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.env
+
+# Node / Frontend
+node_modules/
+dist/
+.DS_Store
+
+# VS Code / IDE
+.vscode/
+.idea/
+
+# Large Model Files (Optional, prevents pushing huge binaries)
+*.pkl
+*.h5
+*.pt
