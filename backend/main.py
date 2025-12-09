@@ -1,19 +1,13 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, File, UploadFile, Form
 from pydantic import BaseModel
 from transformers import pipeline
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import File, UploadFile
+import joblib
+import re
 
-# 1. Initialize the App
 app = FastAPI()
 
-# 2. Setup CORS (Crucial for connecting React to Python)
-# This tells the server: "It's okay if a website running on localhost:5173 talks to me."
-origins = [
-    "http://localhost:5173", # Standard Vite port
-    "http://localhost:3000", # Standard React port (just in case)
-]
-
+# --- CORS ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -22,78 +16,101 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 3. Load the Model (The "Brain")
-# We load it here so it stays in memory (fast) instead of reloading for every request (slow)
-print("Loading model...")
-sentiment_pipeline = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
-print("Model loaded!")
+# --- LOAD MODELS ---
+print("Loading DistilBERT...")
+distilbert_pipeline = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
 
-# 4. Define the Data Structure
-# This ensures we only accept data that looks like { "text": "some review" }
+print("Loading TF-IDF Model...")
+try:
+    tfidf_model = joblib.load('sentiment_model.pkl')
+    tfidf_vectorizer = joblib.load('tfidf_vectorizer.pkl')
+    tfidf_ready = True
+except:
+    print("WARNING: TF-IDF files not found. TF-IDF option will fail.")
+    tfidf_ready = False
+
+print("All models loaded!")
+
+# --- HELPER FOR TF-IDF ---
+def clean_text(text):
+    text = text.lower()
+    text = re.sub(r'[^\w\s]', '', text)
+    return text
+
+# --- INPUT STRUCTURE ---
 class ReviewRequest(BaseModel):
     text: str
+    model_type: str = "distilbert" # Default to the smart one
 
-# 5. The API Endpoint
+# --- PREDICT ENDPOINT ---
 @app.post("/predict")
 async def predict_sentiment(request: ReviewRequest):
-    try:
-        # Get the text from the request
-        review_text = request.text
+    # 1. Check which model the user wants
+    if request.model_type == "tfidf":
+        if not tfidf_ready:
+            raise HTTPException(status_code=500, detail="TF-IDF model files missing on server.")
         
-        # Ask the model
-        result = sentiment_pipeline(review_text)[0]
+        # Use Simple Model
+        cleaned = clean_text(request.text)
+        vec = tfidf_vectorizer.transform([cleaned])
+        prediction = tfidf_model.predict(vec)[0] # 'positive' or 'negative'
+        probs = tfidf_model.predict_proba(vec)[0]
+        confidence = max(probs)
         
-        # result looks like: {'label': 'POSITIVE', 'score': 0.99}
-        return {
-            "sentiment": result['label'],
-            "confidence": result['score']
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"sentiment": prediction.upper(), "confidence": confidence}
 
+    else:
+        # Use Advanced Model (DistilBERT)
+        result = distilbert_pipeline(request.text)[0]
+        return {"sentiment": result['label'], "confidence": result['score']}
+
+# --- FILE ANALYSIS ENDPOINT (Keep this simple, defaulting to DistilBERT for now) ---
 @app.post("/analyze-file")
-async def analyze_file(file: UploadFile = File(...)):
-    # 1. Read the file content
+async def analyze_file(
+    file: UploadFile = File(...),
+    model_type: str = Form("distilbert") # <--- Receives the choice from Frontend
+):
+    # 1. Read file
     content = await file.read()
-
-    # 2. Decode bytes to string (assuming UTF-8)
     text_content = content.decode("utf-8")
-
-    # 3. Split into lines (assuming 1 review per line)
     reviews = text_content.splitlines()
-
-    # 4. Analyze each review
+    
     stats = {"positive": 0, "negative": 0, "total": 0}
-
+    
+    # 2. Check if we are using the Fast Model (TF-IDF)
+    use_tfidf = (model_type == "tfidf") and tfidf_ready
+    
     for review in reviews:
-        # Skip empty lines
         if not review.strip():
             continue
-
-        # Truncate to 512 chars to prevent model crashes on huge text
-        # (DistilBERT has a limit, keeping it safe here)
+            
         safe_review = review[:512]
-
-        result = sentiment_pipeline(safe_review)[0]
-
-        if result['label'] == 'POSITIVE':
+        
+        # 3. The Logic Switch
+        if use_tfidf:
+            # --- Fast Way ---
+            cleaned = clean_text(safe_review)
+            vec = tfidf_vectorizer.transform([cleaned])
+            label = tfidf_model.predict(vec)[0].upper() # 'POSITIVE' or 'NEGATIVE'
+        else:
+            # --- Slow/Smart Way ---
+            result = distilbert_pipeline(safe_review)[0]
+            label = result['label']
+            
+        # 4. Tally stats
+        if label == 'POSITIVE':
             stats["positive"] += 1
         else:
             stats["negative"] += 1
-
+        
         stats["total"] += 1
 
-    # 5. Calculate percentages
+    # 5. Calculate Ratios
     if stats["total"] > 0:
         stats["positive_ratio"] = (stats["positive"] / stats["total"]) * 100
         stats["negative_ratio"] = (stats["negative"] / stats["total"]) * 100
     else:
         stats["positive_ratio"] = 0
         stats["negative_ratio"] = 0
-
+        
     return stats
-
-# Health check endpoint (optional, just to see if server is running)
-@app.get("/")
-def read_root():
-    return {"status": "Server is running"}

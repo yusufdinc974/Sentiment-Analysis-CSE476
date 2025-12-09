@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, TrendingUp, TrendingDown, Clock, Percent, Sparkles, BarChart3, CheckCircle2, Zap, Upload, FileText, PieChart } from 'lucide-react';
+import { Send, TrendingUp, TrendingDown, Clock, Percent, Sparkles, BarChart3, CheckCircle2, Zap, Upload, FileText, PieChart, Brain, Cpu } from 'lucide-react';
 import axios from 'axios';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
 import { Doughnut } from 'react-chartjs-2';
@@ -17,12 +17,14 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  const [selectedModel, setSelectedModel] = useState('distilbert'); // 'distilbert' or 'tfidf'
 
   // Batch analysis state
   const [batchFile, setBatchFile] = useState(null);
   const [batchLoading, setBatchLoading] = useState(false);
   const [batchResult, setBatchResult] = useState(null);
   const [batchError, setBatchError] = useState(null);
+  const [batchSelectedModel, setBatchSelectedModel] = useState('distilbert'); // Separate model for batch
 
   const analyzeSentiment = async () => {
     if (!reviewText.trim()) {
@@ -35,7 +37,10 @@ function App() {
     setResult(null);
 
     const requestTimestamp = performance.now();
-    const requestPayload = { text: reviewText };
+    const requestPayload = { 
+      text: reviewText,
+      model_type: selectedModel 
+    };
     const requestSize = new Blob([JSON.stringify(requestPayload)]).size;
 
     try {
@@ -53,6 +58,7 @@ function App() {
         dataSize: totalDataSize,
         requestSize: requestSize,
         responseSize: responseSize,
+        modelUsed: selectedModel,
       });
     } catch (err) {
       setError(
@@ -74,8 +80,14 @@ function App() {
     setBatchError(null);
     setBatchResult(null);
 
+    const requestTimestamp = performance.now();
+
     const formData = new FormData();
     formData.append('file', batchFile);
+    formData.append('model_type', batchSelectedModel);
+
+    // Calculate file size
+    const fileSize = batchFile.size;
 
     try {
       const response = await axios.post('http://localhost:8000/analyze-file', formData, {
@@ -84,7 +96,21 @@ function App() {
         },
       });
 
-      setBatchResult(response.data);
+      const responseTimestamp = performance.now();
+      const latency = Math.round(responseTimestamp - requestTimestamp);
+
+      // Calculate response size
+      const responseSize = new Blob([JSON.stringify(response.data)]).size;
+      const totalDataSize = fileSize + responseSize;
+
+      setBatchResult({
+        ...response.data,
+        latency: latency,
+        dataSize: totalDataSize,
+        fileSize: fileSize,
+        responseSize: responseSize,
+        modelUsed: batchSelectedModel,
+      });
     } catch (err) {
       setBatchError(
         err.response?.data?.detail || 
@@ -160,6 +186,27 @@ function App() {
     },
   };
 
+  // Model options for the dropdown
+  const modelOptions = [
+    {
+      value: 'distilbert',
+      label: 'DistilBERT',
+      description: 'High Accuracy, Higher Latency',
+      icon: Brain,
+      color: 'indigo'
+    },
+    {
+      value: 'tfidf',
+      label: 'TF-IDF',
+      description: 'Lower Accuracy, Low Latency',
+      icon: Cpu,
+      color: 'purple'
+    }
+  ];
+
+  const selectedModelOption = modelOptions.find(m => m.value === selectedModel);
+  const batchSelectedModelOption = modelOptions.find(m => m.value === batchSelectedModel);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 py-8 px-4 sm:px-6 lg:px-8 flex items-center">
       <div className="max-w-7xl mx-auto w-full">
@@ -234,6 +281,64 @@ function App() {
                 <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-8 relative overflow-hidden">
                   <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
                   
+                  {/* Model Selection */}
+                  <div className="mb-6">
+                    <label className="block text-sm font-bold text-slate-800 mb-3 flex items-center gap-2 uppercase tracking-wide">
+                      <Brain className="h-5 w-5 text-indigo-600" />
+                      Select AI Model
+                    </label>
+                    <div className="relative">
+                      <select
+                        value={selectedModel}
+                        onChange={(e) => setSelectedModel(e.target.value)}
+                        disabled={loading}
+                        className="w-full px-4 py-3 text-slate-900 bg-slate-50 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all duration-200 font-semibold appearance-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {modelOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label} - {option.description}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="absolute right-4 top-1/2 transform -translate-y-1/2 pointer-events-none">
+                        <svg className="h-5 w-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </div>
+                    </div>
+                    
+                    {/* Model Info Card */}
+                    <div className={`mt-3 p-4 rounded-xl border-2 ${
+                      selectedModel === 'distilbert' 
+                        ? 'bg-indigo-50 border-indigo-200' 
+                        : 'bg-purple-50 border-purple-200'
+                    }`}>
+                      <div className="flex items-start gap-3">
+                        {selectedModel === 'distilbert' ? (
+                          <Brain className="h-5 w-5 text-indigo-600 mt-0.5 flex-shrink-0" />
+                        ) : (
+                          <Cpu className="h-5 w-5 text-purple-600 mt-0.5 flex-shrink-0" />
+                        )}
+                        <div>
+                          <p className={`text-sm font-bold ${
+                            selectedModel === 'distilbert' ? 'text-indigo-900' : 'text-purple-900'
+                          }`}>
+                            {selectedModelOption?.label}
+                          </p>
+                          <p className={`text-xs mt-1 ${
+                            selectedModel === 'distilbert' ? 'text-indigo-700' : 'text-purple-700'
+                          }`}>
+                            {selectedModel === 'distilbert' 
+                              ? 'Advanced transformer-based model for superior accuracy'
+                              : 'Fast traditional ML model optimized for speed'
+                            }
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Review Input */}
                   <div className="mb-6">
                     <label
                       htmlFor="review"
@@ -244,7 +349,7 @@ function App() {
                     </label>
                     <textarea
                       id="review"
-                      rows="8"
+                      rows="6"
                       className="w-full px-4 py-3 text-slate-900 bg-slate-50 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all duration-200 resize-none placeholder-slate-400 font-medium"
                       placeholder="Type or paste your movie review here..."
                       value={reviewText}
@@ -433,17 +538,46 @@ function App() {
                               initial={{ opacity: 0, y: 10 }}
                               animate={{ opacity: 1, y: 0 }}
                               transition={{ delay: 0.4 }}
-                              className="bg-white rounded-xl p-5 border-2 border-purple-100 shadow-lg hover:shadow-xl transition-shadow"
+                              className={`bg-white rounded-xl p-5 border-2 shadow-lg hover:shadow-xl transition-shadow ${
+                                result.modelUsed === 'distilbert' 
+                                  ? 'border-indigo-100' 
+                                  : 'border-purple-100'
+                              }`}
                             >
                               <div className="flex items-center gap-2 mb-3">
-                                <div className="p-2 bg-purple-100 rounded-lg">
-                                  <Sparkles className="h-4 w-4 text-purple-600" />
+                                <div className={`p-2 rounded-lg ${
+                                  result.modelUsed === 'distilbert' 
+                                    ? 'bg-indigo-100' 
+                                    : 'bg-purple-100'
+                                }`}>
+                                  {result.modelUsed === 'distilbert' ? (
+                                    <Brain className={`h-4 w-4 ${
+                                      result.modelUsed === 'distilbert' 
+                                        ? 'text-indigo-600' 
+                                        : 'text-purple-600'
+                                    }`} />
+                                  ) : (
+                                    <Cpu className={`h-4 w-4 ${
+                                      result.modelUsed === 'distilbert' 
+                                        ? 'text-indigo-600' 
+                                        : 'text-purple-600'
+                                    }`} />
+                                  )}
                                 </div>
-                                <p className="text-xs text-slate-600 font-bold uppercase tracking-wide">Model Type</p>
+                                <p className="text-xs text-slate-600 font-bold uppercase tracking-wide">Model Used</p>
                               </div>
                               <p className="text-lg font-black text-slate-900 flex items-center gap-2">
-                                <Sparkles className="h-5 w-5 text-purple-600" />
-                                ML Classifier
+                                {result.modelUsed === 'distilbert' ? (
+                                  <>
+                                    <Brain className="h-5 w-5 text-indigo-600" />
+                                    DistilBERT
+                                  </>
+                                ) : (
+                                  <>
+                                    <Cpu className="h-5 w-5 text-purple-600" />
+                                    TF-IDF
+                                  </>
+                                )}
                               </p>
                             </motion.div>
                           </div>
@@ -499,6 +633,64 @@ function App() {
                 <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-8 relative overflow-hidden">
                   <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-teal-500 via-cyan-500 to-blue-500"></div>
                   
+                  {/* Model Selection for Batch */}
+                  <div className="mb-6">
+                    <label className="block text-sm font-bold text-slate-800 mb-3 flex items-center gap-2 uppercase tracking-wide">
+                      <Brain className="h-5 w-5 text-teal-600" />
+                      Select AI Model
+                    </label>
+                    <div className="relative">
+                      <select
+                        value={batchSelectedModel}
+                        onChange={(e) => setBatchSelectedModel(e.target.value)}
+                        disabled={batchLoading}
+                        className="w-full px-4 py-3 text-slate-900 bg-slate-50 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-100 focus:border-teal-400 transition-all duration-200 font-semibold appearance-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {modelOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label} - {option.description}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="absolute right-4 top-1/2 transform -translate-y-1/2 pointer-events-none">
+                        <svg className="h-5 w-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </div>
+                    </div>
+                    
+                    {/* Model Info Card for Batch */}
+                    <div className={`mt-3 p-4 rounded-xl border-2 ${
+                      batchSelectedModel === 'distilbert' 
+                        ? 'bg-indigo-50 border-indigo-200' 
+                        : 'bg-purple-50 border-purple-200'
+                    }`}>
+                      <div className="flex items-start gap-3">
+                        {batchSelectedModel === 'distilbert' ? (
+                          <Brain className="h-5 w-5 text-indigo-600 mt-0.5 flex-shrink-0" />
+                        ) : (
+                          <Cpu className="h-5 w-5 text-purple-600 mt-0.5 flex-shrink-0" />
+                        )}
+                        <div>
+                          <p className={`text-sm font-bold ${
+                            batchSelectedModel === 'distilbert' ? 'text-indigo-900' : 'text-purple-900'
+                          }`}>
+                            {batchSelectedModelOption?.label}
+                          </p>
+                          <p className={`text-xs mt-1 ${
+                            batchSelectedModel === 'distilbert' ? 'text-indigo-700' : 'text-purple-700'
+                          }`}>
+                            {batchSelectedModel === 'distilbert' 
+                              ? 'Advanced transformer-based model for superior accuracy'
+                              : 'Fast traditional ML model optimized for speed'
+                            }
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* File Upload */}
                   <div className="mb-6">
                     <label
                       className="block text-sm font-bold text-slate-800 mb-3 flex items-center gap-2 uppercase tracking-wide"
@@ -518,17 +710,17 @@ function App() {
                       />
                       <label
                         htmlFor="file-upload"
-                        className={`flex flex-col items-center justify-center gap-4 w-full px-4 py-12 border-3 border-dashed rounded-xl cursor-pointer transition-all duration-200 ${
+                        className={`flex flex-col items-center justify-center gap-4 w-full px-4 py-10 border-3 border-dashed rounded-xl cursor-pointer transition-all duration-200 ${
                           batchLoading 
                             ? 'bg-slate-100 border-slate-300 cursor-not-allowed' 
                             : 'bg-slate-50 border-slate-300 hover:border-teal-400 hover:bg-teal-50'
                         }`}
                       >
                         <div className="p-4 bg-teal-100 rounded-2xl">
-                          <Upload className="h-12 w-12 text-teal-600" />
+                          <Upload className="h-10 w-10 text-teal-600" />
                         </div>
                         <div className="text-center">
-                          <p className="font-bold text-lg text-slate-700 mb-1">
+                          <p className="font-bold text-base text-slate-700 mb-1">
                             {batchFile ? batchFile.name : 'Click to upload .txt file'}
                           </p>
                           <p className="text-sm text-slate-500">
@@ -606,33 +798,34 @@ function App() {
                           </div>
                         </div>
 
-                        <div className="px-8 py-10 bg-slate-50">
-                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
+                        <div className="px-8 py-8 bg-slate-50">
+                          {/* Chart and Stats Row */}
+                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
                             {/* Chart */}
                             <div className="flex items-center justify-center">
-                              <div className="w-full max-w-[280px]">
+                              <div className="w-full max-w-[240px]">
                                 <Doughnut data={chartData} options={chartOptions} />
                               </div>
                             </div>
 
                             {/* Stats */}
-                            <div className="space-y-5">
+                            <div className="space-y-4">
                               <motion.div 
                                 initial={{ opacity: 0, x: 20 }}
                                 animate={{ opacity: 1, x: 0 }}
                                 transition={{ delay: 0.2 }}
-                                className="bg-white rounded-xl p-6 border-2 border-emerald-100 shadow-lg"
+                                className="bg-white rounded-xl p-5 border-2 border-emerald-100 shadow-lg"
                               >
-                                <div className="flex items-center gap-3 mb-3">
-                                  <div className="p-2.5 bg-emerald-100 rounded-lg">
-                                    <TrendingUp className="h-6 w-6 text-emerald-600" />
+                                <div className="flex items-center gap-2 mb-2">
+                                  <div className="p-2 bg-emerald-100 rounded-lg">
+                                    <TrendingUp className="h-5 w-5 text-emerald-600" />
                                   </div>
-                                  <p className="text-sm text-slate-600 font-bold uppercase tracking-wide">Positive Reviews</p>
+                                  <p className="text-xs text-slate-600 font-bold uppercase tracking-wide">Positive</p>
                                 </div>
-                                <p className="text-4xl font-black text-emerald-600 mb-1">
+                                <p className="text-3xl font-black text-emerald-600 mb-1">
                                   {batchResult.positive}
                                 </p>
-                                <p className="text-base font-semibold text-slate-500">
+                                <p className="text-sm font-semibold text-slate-500">
                                   {batchResult.positive_ratio.toFixed(1)}% of total
                                 </p>
                               </motion.div>
@@ -641,21 +834,139 @@ function App() {
                                 initial={{ opacity: 0, x: 20 }}
                                 animate={{ opacity: 1, x: 0 }}
                                 transition={{ delay: 0.3 }}
-                                className="bg-white rounded-xl p-6 border-2 border-rose-100 shadow-lg"
+                                className="bg-white rounded-xl p-5 border-2 border-rose-100 shadow-lg"
                               >
-                                <div className="flex items-center gap-3 mb-3">
-                                  <div className="p-2.5 bg-rose-100 rounded-lg">
-                                    <TrendingDown className="h-6 w-6 text-rose-600" />
+                                <div className="flex items-center gap-2 mb-2">
+                                  <div className="p-2 bg-rose-100 rounded-lg">
+                                    <TrendingDown className="h-5 w-5 text-rose-600" />
                                   </div>
-                                  <p className="text-sm text-slate-600 font-bold uppercase tracking-wide">Negative Reviews</p>
+                                  <p className="text-xs text-slate-600 font-bold uppercase tracking-wide">Negative</p>
                                 </div>
-                                <p className="text-4xl font-black text-rose-600 mb-1">
+                                <p className="text-3xl font-black text-rose-600 mb-1">
                                   {batchResult.negative}
                                 </p>
-                                <p className="text-base font-semibold text-slate-500">
+                                <p className="text-sm font-semibold text-slate-500">
                                   {batchResult.negative_ratio.toFixed(1)}% of total
                                 </p>
                               </motion.div>
+                            </div>
+                          </div>
+
+                          {/* Network Metrics */}
+                          <div className="pt-6 border-t-2 border-slate-200">
+                            <h4 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2 uppercase tracking-wide">
+                              <Clock className="h-5 w-5 text-teal-600" />
+                              Network Performance Metrics
+                            </h4>
+                            <div className="grid grid-cols-2 gap-4">
+                              <motion.div 
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: 0.4 }}
+                                className="bg-white rounded-xl p-4 border-2 border-teal-100 shadow-lg"
+                              >
+                                <div className="flex items-center gap-2 mb-2">
+                                  <div className="p-1.5 bg-teal-100 rounded-lg">
+                                    <Clock className="h-4 w-4 text-teal-600" />
+                                  </div>
+                                  <p className="text-xs text-slate-600 font-bold uppercase tracking-wide">Response Time</p>
+                                </div>
+                                <p className="text-2xl font-black text-slate-900">
+                                  {batchResult.latency}
+                                  <span className="text-sm font-semibold text-slate-500 ml-1">ms</span>
+                                </p>
+                              </motion.div>
+
+                              <motion.div 
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: 0.5 }}
+                                className="bg-white rounded-xl p-4 border-2 border-cyan-100 shadow-lg"
+                              >
+                                <div className="flex items-center gap-2 mb-2">
+                                  <div className="p-1.5 bg-cyan-100 rounded-lg">
+                                    <BarChart3 className="h-4 w-4 text-cyan-600" />
+                                  </div>
+                                  <p className="text-xs text-slate-600 font-bold uppercase tracking-wide">Data Size</p>
+                                </div>
+                                <p className="text-2xl font-black text-slate-900">
+                                  {batchResult.dataSize}
+                                  <span className="text-sm font-semibold text-slate-500 ml-1">bytes</span>
+                                </p>
+                              </motion.div>
+
+                              <motion.div 
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: 0.6 }}
+                                className="bg-white rounded-xl p-4 border-2 border-emerald-100 shadow-lg"
+                              >
+                                <div className="flex items-center gap-2 mb-2">
+                                  <div className="p-1.5 bg-emerald-100 rounded-lg">
+                                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                                  </div>
+                                  <p className="text-xs text-slate-600 font-bold uppercase tracking-wide">Status</p>
+                                </div>
+                                <p className="text-xl font-black text-emerald-600 flex items-center gap-1.5">
+                                  <CheckCircle2 className="h-5 w-5" strokeWidth={2.5} />
+                                  Success
+                                </p>
+                              </motion.div>
+
+                              <motion.div 
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: 0.7 }}
+                                className={`bg-white rounded-xl p-4 border-2 shadow-lg ${
+                                  batchResult.modelUsed === 'distilbert' 
+                                    ? 'border-indigo-100' 
+                                    : 'border-purple-100'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 mb-2">
+                                  <div className={`p-1.5 rounded-lg ${
+                                    batchResult.modelUsed === 'distilbert' 
+                                      ? 'bg-indigo-100' 
+                                      : 'bg-purple-100'
+                                  }`}>
+                                    {batchResult.modelUsed === 'distilbert' ? (
+                                      <Brain className="h-4 w-4 text-indigo-600" />
+                                    ) : (
+                                      <Cpu className="h-4 w-4 text-purple-600" />
+                                    )}
+                                  </div>
+                                  <p className="text-xs text-slate-600 font-bold uppercase tracking-wide">Model Used</p>
+                                </div>
+                                <p className="text-base font-black text-slate-900 flex items-center gap-1.5">
+                                  {batchResult.modelUsed === 'distilbert' ? (
+                                    <>
+                                      <Brain className="h-4 w-4 text-indigo-600" />
+                                      DistilBERT
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Cpu className="h-4 w-4 text-purple-600" />
+                                      TF-IDF
+                                    </>
+                                  )}
+                                </p>
+                              </motion.div>
+                            </div>
+
+                            {/* Data Transfer Breakdown */}
+                            <div className="mt-4 pt-4 border-t-2 border-slate-200">
+                              <div className="flex items-center justify-between text-xs">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-2.5 h-2.5 bg-teal-500 rounded-full"></div>
+                                  <span className="font-semibold text-slate-700">File:</span>
+                                  <span className="font-bold text-slate-900">{batchResult.fileSize} bytes</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <div className="w-2.5 h-2.5 bg-cyan-500 rounded-full"></div>
+                                  <span className="font-semibold text-slate-700">Response:</span>
+                                  <span className="font-bold text-slate-900">{batchResult.responseSize} bytes</span>
+                                </div>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -692,7 +1003,7 @@ function App() {
           className="text-center mt-8"
         >
           <div className="inline-flex flex-col items-center gap-2 px-6 py-3 bg-white border-2 border-slate-200 rounded-xl shadow-lg">
-            <p className="text-sm text-slate-800 font-bold">CSE476 - Machine Communication Networks</p>
+            <p className="text-sm text-slate-800 font-bold">CSE476 - Mobile Communication Networks</p>
             <p className="text-xs text-slate-600 font-semibold">Yusuf Dinç & Funda Çelik</p>
           </div>
         </motion.div>
