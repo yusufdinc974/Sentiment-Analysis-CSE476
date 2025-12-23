@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, TrendingUp, TrendingDown, Clock, Percent, Sparkles, BarChart3, CheckCircle2, Zap, Upload, FileText, PieChart, Brain, Cpu } from 'lucide-react';
+import { Send, TrendingUp, TrendingDown, Clock, Percent, Sparkles, BarChart3, CheckCircle2, Zap, Upload, FileText, PieChart, Brain, Cpu, Heart } from 'lucide-react';
 import axios from 'axios';
-import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
-import { Doughnut } from 'react-chartjs-2';
+import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, Title } from 'chart.js';
+import { Doughnut, Bar } from 'react-chartjs-2';
 
 // Register Chart.js components
-ChartJS.register(ArcElement, Tooltip, Legend);
+ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, Title);
 
 function App() {
   // Tab state
@@ -17,7 +17,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
-  const [selectedModel, setSelectedModel] = useState('distilbert'); // 'distilbert' or 'tfidf'
+  const [selectedModel, setSelectedModel] = useState('distilbert'); // 'distilbert', 'tfidf', or 'emotion'
 
   // Batch analysis state
   const [batchFile, setBatchFile] = useState(null);
@@ -54,6 +54,7 @@ function App() {
       setResult({
         sentiment: response.data.sentiment,
         confidence: (response.data.confidence * 100).toFixed(2),
+        details: response.data.details || null, // Emotion model includes details
         latency: latency,
         dataSize: totalDataSize,
         requestSize: requestSize,
@@ -104,7 +105,9 @@ function App() {
       const totalDataSize = fileSize + responseSize;
 
       setBatchResult({
-        ...response.data,
+        modelMode: response.data.model_mode,
+        total: response.data.total,
+        stats: response.data.stats,
         latency: latency,
         dataSize: totalDataSize,
         fileSize: fileSize,
@@ -138,12 +141,34 @@ function App() {
     }
   };
 
-  // Chart.js data configuration
-  const chartData = batchResult ? {
+  // Emotion color palette
+  const emotionColorPalette = [
+    'rgba(251, 191, 36, 0.8)',   // Amber - JOY
+    'rgba(59, 130, 246, 0.8)',   // Blue - SADNESS
+    'rgba(239, 68, 68, 0.8)',    // Red - ANGER
+    'rgba(168, 85, 247, 0.8)',   // Purple - FEAR
+    'rgba(236, 72, 153, 0.8)',   // Pink - SURPRISE
+    'rgba(34, 197, 94, 0.8)',    // Green - DISGUST
+    'rgba(244, 63, 94, 0.8)',    // Rose - LOVE
+    'rgba(99, 102, 241, 0.8)',   // Indigo - ADMIRATION
+    'rgba(249, 115, 22, 0.8)',   // Orange - EXCITEMENT
+    'rgba(20, 184, 166, 0.8)',   // Teal - GRATITUDE
+    'rgba(217, 70, 239, 0.8)',   // Fuchsia
+    'rgba(14, 165, 233, 0.8)',   // Sky
+    'rgba(132, 204, 22, 0.8)',   // Lime
+    'rgba(251, 146, 60, 0.8)',   // Orange-400
+    'rgba(139, 92, 246, 0.8)',   // Violet
+    'rgba(124, 58, 237, 0.8)',   // Violet-600
+    'rgba(165, 180, 252, 0.8)',  // Indigo-300
+    'rgba(252, 165, 165, 0.8)',  // Red-300
+  ];
+
+  // Chart.js configurations
+  const binaryChartData = batchResult && batchResult.modelMode === 'binary' ? {
     labels: ['Positive', 'Negative'],
     datasets: [
       {
-        data: [batchResult.positive, batchResult.negative],
+        data: [batchResult.stats.positive, batchResult.stats.negative],
         backgroundColor: [
           'rgba(16, 185, 129, 0.8)', // Emerald/Green
           'rgba(244, 63, 94, 0.8)',  // Rose/Red
@@ -157,7 +182,20 @@ function App() {
     ],
   } : null;
 
-  const chartOptions = {
+  const emotionChartData = batchResult && batchResult.modelMode === 'emotion' ? {
+    labels: batchResult.stats.map(item => item.label),
+    datasets: [
+      {
+        label: 'Count',
+        data: batchResult.stats.map(item => item.count),
+        backgroundColor: batchResult.stats.map((_, index) => emotionColorPalette[index % emotionColorPalette.length]),
+        borderColor: batchResult.stats.map((_, index) => emotionColorPalette[index % emotionColorPalette.length].replace('0.8', '1')),
+        borderWidth: 2,
+      },
+    ],
+  } : null;
+
+  const binaryChartOptions = {
     responsive: true,
     maintainAspectRatio: true,
     plugins: {
@@ -176,8 +214,8 @@ function App() {
           label: function(context) {
             const label = context.label || '';
             const value = context.parsed || 0;
-            const percentage = batchResult 
-              ? (label === 'Positive' ? batchResult.positive_ratio : batchResult.negative_ratio).toFixed(1)
+            const percentage = batchResult && batchResult.modelMode === 'binary'
+              ? (label === 'Positive' ? batchResult.stats.positive_ratio : batchResult.stats.negative_ratio).toFixed(1)
               : 0;
             return `${label}: ${value} (${percentage}%)`;
           }
@@ -186,8 +224,46 @@ function App() {
     },
   };
 
-  // Model options for the dropdown
-  const modelOptions = [
+  const emotionChartOptions = {
+    indexAxis: 'y',
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        display: false,
+      },
+      tooltip: {
+        callbacks: {
+          label: function(context) {
+            const value = context.parsed.x || 0;
+            const percentage = batchResult && batchResult.modelMode === 'emotion'
+              ? batchResult.stats[context.dataIndex]?.percentage.toFixed(1)
+              : 0;
+            return `Count: ${value} (${percentage}%)`;
+          }
+        }
+      }
+    },
+    scales: {
+      x: {
+        beginAtZero: true,
+        ticks: {
+          precision: 0,
+        },
+      },
+      y: {
+        ticks: {
+          font: {
+            weight: 'bold',
+            size: 11,
+          },
+        },
+      },
+    },
+  };
+
+  // All model options
+  const allModelOptions = [
     {
       value: 'distilbert',
       label: 'DistilBERT',
@@ -201,11 +277,35 @@ function App() {
       description: 'Lower Accuracy, Low Latency',
       icon: Cpu,
       color: 'purple'
+    },
+    {
+      value: 'emotion',
+      label: 'BERT Emotion',
+      description: '28 Emotion Labels',
+      icon: Heart,
+      color: 'pink'
     }
   ];
 
-  const selectedModelOption = modelOptions.find(m => m.value === selectedModel);
-  const batchSelectedModelOption = modelOptions.find(m => m.value === batchSelectedModel);
+  const selectedModelOption = allModelOptions.find(m => m.value === selectedModel);
+  const batchSelectedModelOption = allModelOptions.find(m => m.value === batchSelectedModel);
+
+  // Helper function to get emotion color
+  const getEmotionColor = (sentiment) => {
+    const emotionColors = {
+      'JOY': 'from-yellow-500 via-amber-500 to-yellow-600',
+      'SADNESS': 'from-blue-500 via-indigo-500 to-blue-600',
+      'ANGER': 'from-red-500 via-rose-500 to-red-600',
+      'FEAR': 'from-purple-500 via-violet-500 to-purple-600',
+      'SURPRISE': 'from-pink-500 via-fuchsia-500 to-pink-600',
+      'DISGUST': 'from-green-500 via-emerald-500 to-green-600',
+      'LOVE': 'from-rose-500 via-pink-500 to-rose-600',
+      'ADMIRATION': 'from-indigo-500 via-purple-500 to-indigo-600',
+      'EXCITEMENT': 'from-orange-500 via-amber-500 to-orange-600',
+      'GRATITUDE': 'from-teal-500 via-cyan-500 to-teal-600',
+    };
+    return emotionColors[sentiment?.toUpperCase()] || 'from-indigo-500 via-purple-500 to-indigo-600';
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 py-8 px-4 sm:px-6 lg:px-8 flex items-center">
@@ -268,7 +368,7 @@ function App() {
         {/* Content Area */}
         <AnimatePresence mode="wait">
           {activeTab === 'single' ? (
-            // Single Review Analysis
+            // ==================== SINGLE REVIEW ANALYSIS ====================
             <motion.div
               key="single"
               initial={{ opacity: 0, x: -20 }}
@@ -294,7 +394,7 @@ function App() {
                         disabled={loading}
                         className="w-full px-4 py-3 text-slate-900 bg-slate-50 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all duration-200 font-semibold appearance-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        {modelOptions.map((option) => (
+                        {allModelOptions.map((option) => (
                           <option key={option.value} value={option.value}>
                             {option.label} - {option.description}
                           </option>
@@ -311,26 +411,40 @@ function App() {
                     <div className={`mt-3 p-4 rounded-xl border-2 ${
                       selectedModel === 'distilbert' 
                         ? 'bg-indigo-50 border-indigo-200' 
-                        : 'bg-purple-50 border-purple-200'
+                        : selectedModel === 'tfidf'
+                        ? 'bg-purple-50 border-purple-200'
+                        : 'bg-pink-50 border-pink-200'
                     }`}>
                       <div className="flex items-start gap-3">
                         {selectedModel === 'distilbert' ? (
                           <Brain className="h-5 w-5 text-indigo-600 mt-0.5 flex-shrink-0" />
-                        ) : (
+                        ) : selectedModel === 'tfidf' ? (
                           <Cpu className="h-5 w-5 text-purple-600 mt-0.5 flex-shrink-0" />
+                        ) : (
+                          <Heart className="h-5 w-5 text-pink-600 mt-0.5 flex-shrink-0" />
                         )}
                         <div>
                           <p className={`text-sm font-bold ${
-                            selectedModel === 'distilbert' ? 'text-indigo-900' : 'text-purple-900'
+                            selectedModel === 'distilbert' 
+                              ? 'text-indigo-900' 
+                              : selectedModel === 'tfidf'
+                              ? 'text-purple-900'
+                              : 'text-pink-900'
                           }`}>
                             {selectedModelOption?.label}
                           </p>
                           <p className={`text-xs mt-1 ${
-                            selectedModel === 'distilbert' ? 'text-indigo-700' : 'text-purple-700'
+                            selectedModel === 'distilbert' 
+                              ? 'text-indigo-700' 
+                              : selectedModel === 'tfidf'
+                              ? 'text-purple-700'
+                              : 'text-pink-700'
                           }`}>
                             {selectedModel === 'distilbert' 
                               ? 'Advanced transformer-based model for superior accuracy'
-                              : 'Fast traditional ML model optimized for speed'
+                              : selectedModel === 'tfidf'
+                              ? 'Fast traditional ML model optimized for speed'
+                              : 'Detects 28 different emotions with detailed confidence scores'
                             }
                           </p>
                         </div>
@@ -422,7 +536,9 @@ function App() {
                       >
                         <div
                           className={`px-8 py-8 relative ${
-                            result.sentiment === 'POSITIVE'
+                            result.modelUsed === 'emotion'
+                              ? `bg-gradient-to-br ${getEmotionColor(result.sentiment)}`
+                              : result.sentiment === 'POSITIVE'
                               ? 'bg-gradient-to-br from-emerald-500 via-teal-500 to-emerald-600'
                               : 'bg-gradient-to-br from-rose-500 via-pink-500 to-rose-600'
                           }`}
@@ -430,7 +546,9 @@ function App() {
                           <div className="relative flex items-center justify-between flex-wrap gap-4">
                             <div className="flex items-center gap-4">
                               <div className="bg-white/25 backdrop-blur-md p-3 rounded-xl shadow-lg">
-                                {result.sentiment === 'POSITIVE' ? (
+                                {result.modelUsed === 'emotion' ? (
+                                  <Heart className="h-8 w-8 text-white" strokeWidth={2.5} />
+                                ) : result.sentiment === 'POSITIVE' ? (
                                   <TrendingUp className="h-8 w-8 text-white" strokeWidth={2.5} />
                                 ) : (
                                   <TrendingDown className="h-8 w-8 text-white" strokeWidth={2.5} />
@@ -438,12 +556,14 @@ function App() {
                               </div>
                               <div>
                                 <div className="flex items-center gap-2 mb-1">
-                                  <h3 className="text-3xl font-black text-white tracking-tight">
+                                  <h3 className="text-3xl font-black text-white tracking-tight uppercase">
                                     {result.sentiment}
                                   </h3>
                                   <CheckCircle2 className="h-6 w-6 text-white/90" strokeWidth={2.5} />
                                 </div>
-                                <p className="text-sm text-white/90 font-semibold">Sentiment Detected</p>
+                                <p className="text-sm text-white/90 font-semibold">
+                                  {result.modelUsed === 'emotion' ? 'Emotion Detected' : 'Sentiment Detected'}
+                                </p>
                               </div>
                             </div>
                             <div className="text-right bg-white/20 backdrop-blur-md px-6 py-4 rounded-xl shadow-lg">
@@ -457,6 +577,44 @@ function App() {
                             </div>
                           </div>
                         </div>
+
+                        {/* Emotion Details - Show only for emotion model */}
+                        {result.modelUsed === 'emotion' && result.details && (
+                          <div className="px-8 py-6 bg-gradient-to-br from-indigo-50 to-purple-50 border-b-2 border-slate-200">
+                            <h4 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2 uppercase tracking-wide">
+                              <Heart className="h-5 w-5 text-pink-600" />
+                              Top 3 Emotions Detected
+                            </h4>
+                            <div className="space-y-3">
+                              {result.details.slice(0, 3).map((emotion, index) => (
+                                <motion.div
+                                  key={index}
+                                  initial={{ opacity: 0, x: -20 }}
+                                  animate={{ opacity: 1, x: 0 }}
+                                  transition={{ delay: index * 0.1 }}
+                                  className="bg-white rounded-xl p-4 shadow-md"
+                                >
+                                  <div className="flex items-center justify-between mb-2">
+                                    <span className="text-sm font-bold text-slate-800 uppercase">
+                                      {emotion.label}
+                                    </span>
+                                    <span className="text-sm font-black text-indigo-600">
+                                      {(emotion.score * 100).toFixed(1)}%
+                                    </span>
+                                  </div>
+                                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                                    <motion.div
+                                      initial={{ width: 0 }}
+                                      animate={{ width: `${emotion.score * 100}%` }}
+                                      transition={{ duration: 1, ease: "easeOut", delay: index * 0.1 }}
+                                      className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full"
+                                    />
+                                  </div>
+                                </motion.div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
 
                         <div className="px-8 py-8 bg-slate-50">
                           <h4 className="text-sm font-bold text-slate-800 mb-5 flex items-center gap-2 uppercase tracking-wide">
@@ -541,27 +699,25 @@ function App() {
                               className={`bg-white rounded-xl p-5 border-2 shadow-lg hover:shadow-xl transition-shadow ${
                                 result.modelUsed === 'distilbert' 
                                   ? 'border-indigo-100' 
-                                  : 'border-purple-100'
+                                  : result.modelUsed === 'tfidf'
+                                  ? 'border-purple-100'
+                                  : 'border-pink-100'
                               }`}
                             >
                               <div className="flex items-center gap-2 mb-3">
                                 <div className={`p-2 rounded-lg ${
                                   result.modelUsed === 'distilbert' 
                                     ? 'bg-indigo-100' 
-                                    : 'bg-purple-100'
+                                    : result.modelUsed === 'tfidf'
+                                    ? 'bg-purple-100'
+                                    : 'bg-pink-100'
                                 }`}>
                                   {result.modelUsed === 'distilbert' ? (
-                                    <Brain className={`h-4 w-4 ${
-                                      result.modelUsed === 'distilbert' 
-                                        ? 'text-indigo-600' 
-                                        : 'text-purple-600'
-                                    }`} />
+                                    <Brain className="h-4 w-4 text-indigo-600" />
+                                  ) : result.modelUsed === 'tfidf' ? (
+                                    <Cpu className="h-4 w-4 text-purple-600" />
                                   ) : (
-                                    <Cpu className={`h-4 w-4 ${
-                                      result.modelUsed === 'distilbert' 
-                                        ? 'text-indigo-600' 
-                                        : 'text-purple-600'
-                                    }`} />
+                                    <Heart className="h-4 w-4 text-pink-600" />
                                   )}
                                 </div>
                                 <p className="text-xs text-slate-600 font-bold uppercase tracking-wide">Model Used</p>
@@ -572,10 +728,15 @@ function App() {
                                     <Brain className="h-5 w-5 text-indigo-600" />
                                     DistilBERT
                                   </>
-                                ) : (
+                                ) : result.modelUsed === 'tfidf' ? (
                                   <>
                                     <Cpu className="h-5 w-5 text-purple-600" />
                                     TF-IDF
+                                  </>
+                                ) : (
+                                  <>
+                                    <Heart className="h-5 w-5 text-pink-600" />
+                                    Emotion
                                   </>
                                 )}
                               </p>
@@ -620,7 +781,7 @@ function App() {
               </div>
             </motion.div>
           ) : (
-            // Batch Analysis
+            // ==================== BATCH ANALYSIS ====================
             <motion.div
               key="batch"
               initial={{ opacity: 0, x: 20 }}
@@ -646,7 +807,7 @@ function App() {
                         disabled={batchLoading}
                         className="w-full px-4 py-3 text-slate-900 bg-slate-50 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-100 focus:border-teal-400 transition-all duration-200 font-semibold appearance-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        {modelOptions.map((option) => (
+                        {allModelOptions.map((option) => (
                           <option key={option.value} value={option.value}>
                             {option.label} - {option.description}
                           </option>
@@ -663,26 +824,40 @@ function App() {
                     <div className={`mt-3 p-4 rounded-xl border-2 ${
                       batchSelectedModel === 'distilbert' 
                         ? 'bg-indigo-50 border-indigo-200' 
-                        : 'bg-purple-50 border-purple-200'
+                        : batchSelectedModel === 'tfidf'
+                        ? 'bg-purple-50 border-purple-200'
+                        : 'bg-pink-50 border-pink-200'
                     }`}>
                       <div className="flex items-start gap-3">
                         {batchSelectedModel === 'distilbert' ? (
                           <Brain className="h-5 w-5 text-indigo-600 mt-0.5 flex-shrink-0" />
-                        ) : (
+                        ) : batchSelectedModel === 'tfidf' ? (
                           <Cpu className="h-5 w-5 text-purple-600 mt-0.5 flex-shrink-0" />
+                        ) : (
+                          <Heart className="h-5 w-5 text-pink-600 mt-0.5 flex-shrink-0" />
                         )}
                         <div>
                           <p className={`text-sm font-bold ${
-                            batchSelectedModel === 'distilbert' ? 'text-indigo-900' : 'text-purple-900'
+                            batchSelectedModel === 'distilbert' 
+                              ? 'text-indigo-900' 
+                              : batchSelectedModel === 'tfidf'
+                              ? 'text-purple-900'
+                              : 'text-pink-900'
                           }`}>
                             {batchSelectedModelOption?.label}
                           </p>
                           <p className={`text-xs mt-1 ${
-                            batchSelectedModel === 'distilbert' ? 'text-indigo-700' : 'text-purple-700'
+                            batchSelectedModel === 'distilbert' 
+                              ? 'text-indigo-700' 
+                              : batchSelectedModel === 'tfidf'
+                              ? 'text-purple-700'
+                              : 'text-pink-700'
                           }`}>
                             {batchSelectedModel === 'distilbert' 
                               ? 'Advanced transformer-based model for superior accuracy'
-                              : 'Fast traditional ML model optimized for speed'
+                              : batchSelectedModel === 'tfidf'
+                              ? 'Fast traditional ML model optimized for speed'
+                              : 'Analyzes 28 different emotions across all reviews'
                             }
                           </p>
                         </div>
@@ -799,58 +974,95 @@ function App() {
                         </div>
 
                         <div className="px-8 py-8 bg-slate-50">
-                          {/* Chart and Stats Row */}
-                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-                            {/* Chart */}
-                            <div className="flex items-center justify-center">
-                              <div className="w-full max-w-[240px]">
-                                <Doughnut data={chartData} options={chartOptions} />
+                          {/* Conditional Chart Rendering */}
+                          {batchResult.modelMode === 'binary' ? (
+                            // Binary Mode - Pie Chart
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                              {/* Chart */}
+                              <div className="flex items-center justify-center">
+                                <div className="w-full max-w-[240px]">
+                                  <Doughnut data={binaryChartData} options={binaryChartOptions} />
+                                </div>
+                              </div>
+
+                              {/* Stats */}
+                              <div className="space-y-4">
+                                <motion.div 
+                                  initial={{ opacity: 0, x: 20 }}
+                                  animate={{ opacity: 1, x: 0 }}
+                                  transition={{ delay: 0.2 }}
+                                  className="bg-white rounded-xl p-5 border-2 border-emerald-100 shadow-lg"
+                                >
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <div className="p-2 bg-emerald-100 rounded-lg">
+                                      <TrendingUp className="h-5 w-5 text-emerald-600" />
+                                    </div>
+                                    <p className="text-xs text-slate-600 font-bold uppercase tracking-wide">Positive</p>
+                                  </div>
+                                  <p className="text-3xl font-black text-emerald-600 mb-1">
+                                    {batchResult.stats.positive}
+                                  </p>
+                                  <p className="text-sm font-semibold text-slate-500">
+                                    {batchResult.stats.positive_ratio.toFixed(1)}% of total
+                                  </p>
+                                </motion.div>
+
+                                <motion.div 
+                                  initial={{ opacity: 0, x: 20 }}
+                                  animate={{ opacity: 1, x: 0 }}
+                                  transition={{ delay: 0.3 }}
+                                  className="bg-white rounded-xl p-5 border-2 border-rose-100 shadow-lg"
+                                >
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <div className="p-2 bg-rose-100 rounded-lg">
+                                      <TrendingDown className="h-5 w-5 text-rose-600" />
+                                    </div>
+                                    <p className="text-xs text-slate-600 font-bold uppercase tracking-wide">Negative</p>
+                                  </div>
+                                  <p className="text-3xl font-black text-rose-600 mb-1">
+                                    {batchResult.stats.negative}
+                                  </p>
+                                  <p className="text-sm font-semibold text-slate-500">
+                                    {batchResult.stats.negative_ratio.toFixed(1)}% of total
+                                  </p>
+                                </motion.div>
                               </div>
                             </div>
-
-                            {/* Stats */}
-                            <div className="space-y-4">
-                              <motion.div 
-                                initial={{ opacity: 0, x: 20 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                transition={{ delay: 0.2 }}
-                                className="bg-white rounded-xl p-5 border-2 border-emerald-100 shadow-lg"
-                              >
-                                <div className="flex items-center gap-2 mb-2">
-                                  <div className="p-2 bg-emerald-100 rounded-lg">
-                                    <TrendingUp className="h-5 w-5 text-emerald-600" />
-                                  </div>
-                                  <p className="text-xs text-slate-600 font-bold uppercase tracking-wide">Positive</p>
-                                </div>
-                                <p className="text-3xl font-black text-emerald-600 mb-1">
-                                  {batchResult.positive}
-                                </p>
-                                <p className="text-sm font-semibold text-slate-500">
-                                  {batchResult.positive_ratio.toFixed(1)}% of total
-                                </p>
-                              </motion.div>
-
-                              <motion.div 
-                                initial={{ opacity: 0, x: 20 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                transition={{ delay: 0.3 }}
-                                className="bg-white rounded-xl p-5 border-2 border-rose-100 shadow-lg"
-                              >
-                                <div className="flex items-center gap-2 mb-2">
-                                  <div className="p-2 bg-rose-100 rounded-lg">
-                                    <TrendingDown className="h-5 w-5 text-rose-600" />
-                                  </div>
-                                  <p className="text-xs text-slate-600 font-bold uppercase tracking-wide">Negative</p>
-                                </div>
-                                <p className="text-3xl font-black text-rose-600 mb-1">
-                                  {batchResult.negative}
-                                </p>
-                                <p className="text-sm font-semibold text-slate-500">
-                                  {batchResult.negative_ratio.toFixed(1)}% of total
-                                </p>
-                              </motion.div>
+                          ) : (
+                            // Emotion Mode - Bar Chart
+                            <div className="mb-6">
+                              <h4 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2 uppercase tracking-wide">
+                                <Heart className="h-5 w-5 text-pink-600" />
+                                Emotion Distribution
+                              </h4>
+                              <div className="bg-white rounded-xl p-6 border-2 border-slate-200 shadow-lg" style={{ height: '400px' }}>
+                                <Bar data={emotionChartData} options={emotionChartOptions} />
+                              </div>
+                              
+                              {/* Top 3 Emotions Summary */}
+                              <div className="mt-6 grid grid-cols-3 gap-3">
+                                {batchResult.stats.slice(0, 3).map((emotion, index) => (
+                                  <motion.div
+                                    key={index}
+                                    initial={{ opacity: 0, y: 10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ delay: 0.2 + index * 0.1 }}
+                                    className="bg-white rounded-xl p-4 border-2 border-indigo-100 shadow-lg text-center"
+                                  >
+                                    <p className="text-xs text-slate-600 font-bold uppercase tracking-wide mb-2">
+                                      #{index + 1} {emotion.label}
+                                    </p>
+                                    <p className="text-2xl font-black text-indigo-600">
+                                      {emotion.count}
+                                    </p>
+                                    <p className="text-xs text-slate-500 font-semibold mt-1">
+                                      {emotion.percentage.toFixed(1)}%
+                                    </p>
+                                  </motion.div>
+                                ))}
+                              </div>
                             </div>
-                          </div>
+                          )}
 
                           {/* Network Metrics */}
                           <div className="pt-6 border-t-2 border-slate-200">
@@ -920,19 +1132,25 @@ function App() {
                                 className={`bg-white rounded-xl p-4 border-2 shadow-lg ${
                                   batchResult.modelUsed === 'distilbert' 
                                     ? 'border-indigo-100' 
-                                    : 'border-purple-100'
+                                    : batchResult.modelUsed === 'tfidf'
+                                    ? 'border-purple-100'
+                                    : 'border-pink-100'
                                 }`}
                               >
                                 <div className="flex items-center gap-2 mb-2">
                                   <div className={`p-1.5 rounded-lg ${
                                     batchResult.modelUsed === 'distilbert' 
                                       ? 'bg-indigo-100' 
-                                      : 'bg-purple-100'
+                                      : batchResult.modelUsed === 'tfidf'
+                                      ? 'bg-purple-100'
+                                      : 'bg-pink-100'
                                   }`}>
                                     {batchResult.modelUsed === 'distilbert' ? (
                                       <Brain className="h-4 w-4 text-indigo-600" />
-                                    ) : (
+                                    ) : batchResult.modelUsed === 'tfidf' ? (
                                       <Cpu className="h-4 w-4 text-purple-600" />
+                                    ) : (
+                                      <Heart className="h-4 w-4 text-pink-600" />
                                     )}
                                   </div>
                                   <p className="text-xs text-slate-600 font-bold uppercase tracking-wide">Model Used</p>
@@ -943,10 +1161,15 @@ function App() {
                                       <Brain className="h-4 w-4 text-indigo-600" />
                                       DistilBERT
                                     </>
-                                  ) : (
+                                  ) : batchResult.modelUsed === 'tfidf' ? (
                                     <>
                                       <Cpu className="h-4 w-4 text-purple-600" />
                                       TF-IDF
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Heart className="h-4 w-4 text-pink-600" />
+                                      Emotion
                                     </>
                                   )}
                                 </p>
